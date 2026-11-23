@@ -434,3 +434,143 @@ test('statusParticles configures green poison bubbles, crystalline frost shards,
   assert.equal(scene.children.length, 0, 'dispose removes all status particle meshes from scene');
 });
 
+test('soundEngine.dodgeIframe triggers dual lowpass BiquadFilterNode frequency sweeps and respects mute state', async () => {
+  const { soundEngine, DODGE_IFRAME_AUDIO_CONFIG } = await import('./audio');
+
+  assert.equal(DODGE_IFRAME_AUDIO_CONFIG.filterType, 'lowpass');
+  assert.ok(DODGE_IFRAME_AUDIO_CONFIG.cutoffStartHz > DODGE_IFRAME_AUDIO_CONFIG.cutoffEndHz);
+
+  const createdFilters: Array<{
+    type: string;
+    freqStart: number | null;
+    freqEnd: number | null;
+    q: number | null;
+  }> = [];
+
+  const makeParam = () => {
+    let start: number | null = null;
+    let end: number | null = null;
+    return {
+      value: 0,
+      setValueAtTime: (v: number) => {
+        start = v;
+      },
+      linearRampToValueAtTime: () => {},
+      exponentialRampToValueAtTime: (v: number) => {
+        end = v;
+      },
+      getStart: () => start,
+      getEnd: () => end,
+    };
+  };
+
+  const mockCtx = {
+    currentTime: 1.5,
+    sampleRate: 44100,
+    state: 'running',
+    destination: {},
+    createBuffer: (_ch: number, len: number) => ({
+      getChannelData: () => new Float32Array(len),
+    }),
+    createBufferSource: () => ({
+      buffer: null,
+      connect: () => {},
+      start: () => {},
+    }),
+    createBiquadFilter: () => {
+      const freq = makeParam();
+      const q = makeParam();
+      const node = {
+        type: 'lowpass',
+        frequency: freq,
+        Q: q,
+        connect: () => {},
+      };
+      // Defer snapshot capture via getters
+      Object.defineProperty(node, 'type', {
+        get: () => filterRecord.type,
+        set: (v: string) => {
+          filterRecord.type = v;
+        },
+      });
+      const filterRecord = {
+        type: 'lowpass',
+        get freqStart() {
+          return freq.getStart();
+        },
+        get freqEnd() {
+          return freq.getEnd();
+        },
+        get q() {
+          return q.getStart();
+        },
+      };
+      createdFilters.push(filterRecord);
+      return node;
+    },
+    createGain: () => ({
+      gain: makeParam(),
+      connect: () => {},
+    }),
+    createOscillator: () => ({
+      type: 'sine',
+      frequency: makeParam(),
+      connect: () => {},
+      start: () => {},
+      stop: () => {},
+    }),
+  };
+
+  soundEngine.configure(0.8, false);
+  soundEngine.setAudioContextForTest(mockCtx as unknown as AudioContext);
+  soundEngine.dodgeIframe();
+
+  assert.equal(createdFilters.length, 2, 'Creates two lowpass filters (noise sweep + sub-harmonic)');
+  for (const f of createdFilters) {
+    assert.equal(f.type, 'lowpass');
+    assert.ok((f.freqStart ?? 0) > (f.freqEnd ?? 0), 'Low-pass cutoff sweeps downward');
+    assert.ok((f.q ?? 0) > 1.5, 'Low-pass Q adds resonant phase warmth');
+  }
+
+  // Respects muted mode without creating nodes
+  const countBeforeMute = createdFilters.length;
+  soundEngine.configure(0.8, true);
+  soundEngine.dodgeIframe();
+  assert.equal(createdFilters.length, countBeforeMute);
+
+  soundEngine.setAudioContextForTest(null);
+  soundEngine.configure(0.7, false);
+});
+
+test('SaveState persists non-negative death counts across localStorage reloads', async () => {
+  const { createInitialSaveState } = await import('./data');
+  const { loadSaveState, persistSaveState } = await import('./storage');
+
+  const store = new Map<string, string>();
+  const prevWindow = (globalThis as unknown as { window?: unknown }).window;
+  (globalThis as unknown as { window: unknown }).window = {
+    localStorage: {
+      getItem: (k: string) => store.get(k) ?? null,
+      setItem: (k: string, v: string) => store.set(k, v),
+      removeItem: (k: string) => store.delete(k),
+    },
+  };
+
+  try {
+    const initial = createInitialSaveState();
+    assert.equal(initial.deaths, 0);
+    persistSaveState({ ...initial, deaths: 4 });
+    const reloaded = loadSaveState();
+    assert.equal(reloaded.deaths, 4);
+
+    // Sanitizes invalid/negative death counts safely
+    store.set('ashenveil_save_v1', JSON.stringify({ deaths: -3 }));
+    assert.equal(loadSaveState().deaths, 0);
+  } finally {
+    if (prevWindow === undefined) {
+      delete (globalThis as unknown as { window?: unknown }).window;
+    } else {
+      (globalThis as unknown as { window?: unknown }).window = prevWindow;
+    }
+  }
+});

@@ -1,16 +1,41 @@
+export const DODGE_IFRAME_AUDIO_CONFIG = {
+  duration: 0.28,
+  filterType: 'lowpass' as BiquadFilterType,
+  cutoffStartHz: 1480,
+  cutoffEndHz: 210,
+  filterQ: 3.4,
+  harmonicCutoffStartHz: 1120,
+  harmonicCutoffEndHz: 190,
+  harmonicFilterQ: 2.6,
+  carrierFreqStart: 310,
+  carrierFreqEnd: 138,
+  harmonicFreqStart: 465,
+  harmonicFreqEnd: 205,
+} as const;
+
 class SoundEngine {
   private ctx: AudioContext | null = null;
   private volume = 0.7;
   private muted = false;
 
+  public setAudioContextForTest(ctx: AudioContext | null): void {
+    this.ctx = ctx;
+  }
+
   private ensureContext(): AudioContext | null {
     if (this.muted || this.volume <= 0.01) return null;
-    if (typeof window === 'undefined') return null;
-    if (!this.ctx) {
-      const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-      if (!AudioCtx) return null;
-      this.ctx = new AudioCtx();
+    if (this.ctx) {
+      if (this.ctx.state === 'suspended' && typeof this.ctx.resume === 'function') {
+        this.ctx.resume().catch(() => {});
+      }
+      return this.ctx;
     }
+    if (typeof window === 'undefined') return null;
+    const AudioCtx =
+      window.AudioContext ||
+      (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+    if (!AudioCtx) return null;
+    this.ctx = new AudioCtx();
     if (this.ctx.state === 'suspended') {
       this.ctx.resume().catch(() => {});
     }
@@ -99,6 +124,81 @@ class SoundEngine {
 
   public dodge(): void {
     this.playNoiseBurst(0.16, 360, 0.14);
+  }
+
+  /**
+   * Distinct low-pass filtered spectral phase cue triggered at the moment
+   * the player enters the dodge i-frame window.
+   */
+  public dodgeIframe(): void {
+    const ctx = this.ensureContext();
+    if (!ctx) return;
+
+    const cfg = DODGE_IFRAME_AUDIO_CONFIG;
+    const now = ctx.currentTime;
+    const dur = cfg.duration;
+
+    // 1. Low-pass filtered air-slip sweep
+    const sampleCount = Math.max(1, Math.floor(ctx.sampleRate * dur));
+    const buffer = ctx.createBuffer(1, sampleCount, ctx.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < sampleCount; i++) {
+      const t = i / sampleCount;
+      const env = Math.sin(Math.PI * Math.min(1, t * 1.15)) * (1 - t * 0.55);
+      data[i] = (Math.random() * 2 - 1) * env;
+    }
+
+    const noiseSrc = ctx.createBufferSource();
+    noiseSrc.buffer = buffer;
+
+    const noiseFilter = ctx.createBiquadFilter();
+    noiseFilter.type = cfg.filterType;
+    noiseFilter.Q.setValueAtTime(cfg.filterQ, now);
+    noiseFilter.frequency.setValueAtTime(cfg.cutoffStartHz, now);
+    noiseFilter.frequency.exponentialRampToValueAtTime(cfg.cutoffEndHz, now + dur);
+
+    const noiseGain = ctx.createGain();
+    noiseGain.gain.setValueAtTime(0.0001, now);
+    noiseGain.gain.linearRampToValueAtTime(0.22 * this.volume, now + 0.02);
+    noiseGain.gain.exponentialRampToValueAtTime(0.0001, now + dur);
+
+    noiseSrc.connect(noiseFilter);
+    noiseFilter.connect(noiseGain);
+    noiseGain.connect(ctx.destination);
+    noiseSrc.start(now);
+
+    // 2. Low-pass filtered sub-harmonic phase shimmer
+    const oscA = ctx.createOscillator();
+    const oscB = ctx.createOscillator();
+    const oscFilter = ctx.createBiquadFilter();
+    const oscGain = ctx.createGain();
+
+    oscA.type = 'sine';
+    oscA.frequency.setValueAtTime(cfg.carrierFreqStart, now);
+    oscA.frequency.exponentialRampToValueAtTime(cfg.carrierFreqEnd, now + dur);
+
+    oscB.type = 'triangle';
+    oscB.frequency.setValueAtTime(cfg.harmonicFreqStart, now);
+    oscB.frequency.exponentialRampToValueAtTime(cfg.harmonicFreqEnd, now + dur);
+
+    oscFilter.type = cfg.filterType;
+    oscFilter.Q.setValueAtTime(cfg.harmonicFilterQ, now);
+    oscFilter.frequency.setValueAtTime(cfg.harmonicCutoffStartHz, now);
+    oscFilter.frequency.exponentialRampToValueAtTime(cfg.harmonicCutoffEndHz, now + dur);
+
+    oscGain.gain.setValueAtTime(0.0001, now);
+    oscGain.gain.linearRampToValueAtTime(0.16 * this.volume, now + 0.018);
+    oscGain.gain.exponentialRampToValueAtTime(0.0001, now + dur);
+
+    oscA.connect(oscFilter);
+    oscB.connect(oscFilter);
+    oscFilter.connect(oscGain);
+    oscGain.connect(ctx.destination);
+
+    oscA.start(now);
+    oscB.start(now);
+    oscA.stop(now + dur + 0.02);
+    oscB.stop(now + dur + 0.02);
   }
 
   public playerHurt(): void {

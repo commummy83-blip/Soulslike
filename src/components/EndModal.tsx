@@ -3,6 +3,7 @@ import type { EndRunSnapshot } from '../game/types';
 interface EndModalProps {
   mode: 'paused' | 'gameover';
   endSnapshot: EndRunSnapshot | null;
+  deaths: number;
   onResume: () => void;
   onRespawnAtBonfire: () => void;
   onOpenCharacter: () => void;
@@ -19,6 +20,7 @@ function formatDuration(sec: number): string {
 export function EndModal({
   mode,
   endSnapshot,
+  deaths,
   onResume,
   onRespawnAtBonfire,
   onOpenCharacter,
@@ -79,13 +81,14 @@ export function EndModal({
   }
 
   const isVictory = endSnapshot?.outcome === 'victory';
+  const totalAttempts = isVictory ? deaths + 1 : Math.max(1, deaths);
 
   return (
     <div className="fixed inset-0 z-30 flex items-center justify-center bg-[#080706]/86 p-4">
       <div
         role="dialog"
         aria-label={isVictory ? 'Victory' : 'You Died'}
-        className="w-full max-w-md bg-[#14110f] border border-[#8c6d41] p-8 text-center shadow-[0_20px_54px_rgba(0,0,0,0.92)]"
+        className="w-full max-w-lg bg-[#14110f] border border-[#8c6d41] p-7 sm:p-8 text-center shadow-[0_20px_54px_rgba(0,0,0,0.92)]"
       >
         <h2
           className={`font-display text-3xl tracking-[0.24em] uppercase mb-2 ${
@@ -100,30 +103,51 @@ export function EndModal({
             : 'Your embers fade, yet the Sanctum Bonfire calls you back.'}
         </p>
 
-        {endSnapshot && (
-          <div className="grid grid-cols-3 gap-2.5 mb-7 text-left">
-            <div className="p-3 bg-[#1b1714] border border-[#4a3c2a]">
-              <div className="text-[10px] uppercase tracking-[0.14em] text-[#968772]">Time</div>
-              <div className="text-lg font-bold tabular-nums text-[#efe0c6]">
-                {formatDuration(endSnapshot.clearTimeSeconds)}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 mb-7 text-left">
+          {endSnapshot && (
+            <>
+              <div className="p-3 bg-[#1b1714] border border-[#4a3c2a]">
+                <div className="text-[10px] uppercase tracking-[0.14em] text-[#968772]">Time</div>
+                <div className="text-lg font-bold tabular-nums text-[#efe0c6]">
+                  {formatDuration(endSnapshot.clearTimeSeconds)}
+                </div>
               </div>
+              <div className="p-3 bg-[#1b1714] border border-[#4a3c2a]">
+                <div className="text-[10px] uppercase tracking-[0.14em] text-[#968772]">Slain</div>
+                <div className="text-lg font-bold tabular-nums text-[#efe0c6]">
+                  {endSnapshot.enemiesSlain}
+                </div>
+              </div>
+              <div className="p-3 bg-[#1b1714] border border-[#4a3c2a]">
+                <div className="text-[10px] uppercase tracking-[0.14em] text-[#968772]">
+                  {isVictory ? 'Souls' : 'Boss HP'}
+                </div>
+                <div className="text-lg font-bold tabular-nums text-[#f2cf88]">
+                  {isVictory ? endSnapshot.soulsHeld : `${endSnapshot.bossHpRemainingPercent}%`}
+                </div>
+              </div>
+            </>
+          )}
+          <div
+            data-testid="death-counter"
+            className={`p-3 bg-[#1b1714] border border-[#4a3c2a] ${
+              endSnapshot ? '' : 'col-span-2 sm:col-span-4'
+            }`}
+          >
+            <div className="text-[10px] uppercase tracking-[0.14em] text-[#968772]">Deaths</div>
+            <div
+              data-testid="death-count-value"
+              className={`text-lg font-bold tabular-nums ${
+                isVictory ? 'text-[#efe0c6]' : 'text-[#e05a52]'
+              }`}
+            >
+              {deaths}
             </div>
-            <div className="p-3 bg-[#1b1714] border border-[#4a3c2a]">
-              <div className="text-[10px] uppercase tracking-[0.14em] text-[#968772]">Slain</div>
-              <div className="text-lg font-bold tabular-nums text-[#efe0c6]">
-                {endSnapshot.enemiesSlain}
-              </div>
-            </div>
-            <div className="p-3 bg-[#1b1714] border border-[#4a3c2a]">
-              <div className="text-[10px] uppercase tracking-[0.14em] text-[#968772]">
-                {isVictory ? 'Souls' : 'Boss HP'}
-              </div>
-              <div className="text-lg font-bold tabular-nums text-[#f2cf88]">
-                {isVictory ? endSnapshot.soulsHeld : `${endSnapshot.bossHpRemainingPercent}%`}
-              </div>
+            <div className="text-[10px] uppercase tracking-[0.1em] text-[#8a7c68] mt-0.5">
+              Attempt #{totalAttempts}
             </div>
           </div>
-        )}
+        </div>
 
         <div className="flex flex-col gap-2.5">
           <button

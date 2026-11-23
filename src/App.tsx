@@ -325,6 +325,7 @@ export default function App() {
         <EndModal
           mode={shellState}
           endSnapshot={endSnapshot}
+          deaths={save.deaths}
           onResume={() => setShellState('playing')}
           onRespawnAtBonfire={() => {
             engineRef.current?.restAtBonfire(true);

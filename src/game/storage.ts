@@ -43,6 +43,10 @@ export function loadSaveState(): SaveState {
       weaponLevels: { ...base.weaponLevels, ...(parsed.weaponLevels ?? {}) },
       consumables: { ...base.consumables, ...(parsed.consumables ?? {}) },
       quests: Array.isArray(parsed.quests) && parsed.quests.length > 0 ? parsed.quests : base.quests,
+      deaths:
+        typeof parsed.deaths === 'number' && Number.isFinite(parsed.deaths) && parsed.deaths >= 0
+          ? Math.floor(parsed.deaths)
+          : base.deaths,
     };
   } catch {
     return createInitialSaveState();

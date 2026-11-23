@@ -1178,6 +1178,7 @@ export class GameEngine {
       this.playerStamina -= 18;
       this.playerAction = 'dodge';
       this.actionTimer = 0.38;
+      const enteredIframes = this.invulnTimer <= 0;
       this.invulnTimer = 0.3;
       this.dodgeGhostAccum = 0;
       this.squashY = 0.84;
@@ -1187,6 +1188,9 @@ export class GameEngine {
       }
       this.spawnDodgeGhost(10);
       soundEngine.dodge();
+      if (enteredIframes) {
+        soundEngine.dodgeIframe();
+      }
       this.emitHudSnapshot();
     } else if (
       this.bufferedAction === 'light' &&
